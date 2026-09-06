@@ -18,30 +18,28 @@ async def parse_flight_card(card_locator):
 
     ob_left_block = outbound_grid.locator("div.flex-none").nth(0)
     ob_middle_block = outbound_grid.locator("div.flex-auto.flex-col").first
-    # ob_right_block = outbound_grid.locator("div.flex-none").nth(1)
+    ob_right_block = outbound_grid.locator("div.flex-none").last
 
     ob_depart_time = await ob_left_block.locator("div.text-lg").inner_text()
     ob_depart_date = await ob_left_block.locator("div.text-xs").last.inner_text()
     ob_duration = await ob_middle_block.locator("div").first.inner_text()
 
-    # ob_landing_time = await ob_right_block.locator("div.text-lg").inner_text()
-    # print(ob_landing_time)
-    # ob_landing_date = await ob_right_block.locator("div.text-xs").last.inner_text()
+    ob_landing_time = await ob_right_block.locator("div.text-lg").inner_text()
+    ob_landing_date = await ob_right_block.locator("div.text-xs").last.inner_text()
 
-    # 3. Inbound/Return Leg (Second grid)
     inbound_grid = card_locator.locator("div.grid").nth(1)
     inbound_airline = await inbound_grid.locator("img").first.get_attribute("alt")
 
     ib_left_block = inbound_grid.locator("div.flex-none").nth(0)
     ib_middle_block = inbound_grid.locator("div.flex-auto.flex-col").first
-    # ib_right_block = inbound_grid.locator("div.flex-none").nth(1)
+    ib_right_block = inbound_grid.locator("div.flex-none").last
 
     ib_depart_time = await ib_left_block.locator("div.text-lg").inner_text()
     ib_depart_date = await ib_left_block.locator("div.text-xs").last.inner_text()
     ib_duration = await ib_middle_block.locator("div").first.inner_text()
 
-    # ib_landing_time = await ib_right_block.locator("div.text-lg").inner_text()
-    # ib_landing_date = await ib_right_block.locator("div.text-xs").last.inner_text()
+    ib_landing_time = await ib_right_block.locator("div.text-lg").inner_text()
+    ib_landing_date = await ib_right_block.locator("div.text-xs").last.inner_text()
 
     return {
         "price": price,
@@ -49,16 +47,16 @@ async def parse_flight_card(card_locator):
             "airline": outbound_airline or "Unknown",
             "depart_date": ob_depart_date.strip(),
             "depart_time": ob_depart_time.strip(),
-            # "landing_date": ob_landing_date.strip(),
-            # "landing_time": ob_landing_time.strip(),
+            "landing_date": ob_landing_date.strip(),
+            "landing_time": ob_landing_time.strip(),
             "duration": ob_duration.strip().replace("\n", " "),
         },
         "inbound": {
             "airline": inbound_airline or "Unknown",
             "depart_date": ib_depart_date.strip(),
             "depart_time": ib_depart_time.strip(),
-            # "landing_date": ib_landing_date.strip(),
-            # "landing_time": ib_landing_time.strip(),
+            "landing_date": ib_landing_date.strip(),
+            "landing_time": ib_landing_time.strip(),
             "duration": ib_duration.strip().replace("\n", " "),
         }
     }
