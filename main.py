@@ -1,23 +1,25 @@
 import asyncio
 from playwright.async_api import async_playwright
-import pandas as pd
+# import pandas as pd
 import os
 import re
 from supabase import create_client, Client
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 
-load_dotenv(override=True)
+# load_dotenv(override=True)
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY")
+# SUPABASE_URL = os.getenv("SUPABASE_URL")
+# SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY")
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_PUBLISHABLE_KEY = os.environ.get("SUPABASE_PUBLISHABLE_KEY")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY)
 
-DEPART_DATES = ["2026-12-19"]
-# DEPART_DATES = ["2026-12-19", "2026-12-20"]
-RETURN_DATES = ["2027-02-25"]
-# RETURN_DATES = ["2027-02-25", "2027-02-26",
-#                 "2027-02-27", "2027-02-28"]
+# DEPART_DATES = ["2026-12-19"]
+DEPART_DATES = ["2026-12-19", "2026-12-20"]
+# RETURN_DATES = ["2027-02-25"]
+RETURN_DATES = ["2027-02-25", "2027-02-26",
+                "2027-02-27", "2027-02-28"]
 
 
 def clean_price(price_str: str) -> int:
