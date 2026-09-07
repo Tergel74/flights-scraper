@@ -1,12 +1,58 @@
 import asyncio
 from playwright.async_api import async_playwright
 import pandas as pd
+import os
+import re
+from supabase import create_client, Client
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY")
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY)
 
 DEPART_DATES = ["2026-12-19"]
 # DEPART_DATES = ["2026-12-19", "2026-12-20"]
 RETURN_DATES = ["2027-02-25"]
 # RETURN_DATES = ["2027-02-25", "2027-02-26",
 #                 "2027-02-27", "2027-02-28"]
+
+
+def clean_price(price_str: str) -> int:
+    digits = re.sub(r'[^\d]', '', price_str)
+    return int(digits) if digits else 0
+
+
+def save_flights_to_supabase(flight_list: list, route: str = "ICN-UBN"):
+    records = []
+
+    for f in flight_list:
+        ob = f.get("outbound", {})
+        ib = f.get("inbound", {})
+
+        record = {
+            "route": route,
+            "price": clean_price(f.get("price", "0")),
+            "currency": "MNT",
+            "outbound_airline": ob.get("airline"),
+            "outbound_depart_date": ob.get("depart_date"),
+            "outbound_depart_time": ob.get("depart_time"),
+            "outbound_landing_time": ob.get("landing_time"),
+            "inbound_airline": ib.get("airline"),
+            "inbound_depart_date": ib.get("depart_date"),
+            "inbound_depart_time": ib.get("depart_time"),
+            "inbound_landing_time": ib.get("landing_time"),
+            "raw_payload": f
+        }
+        records.append(record)
+
+    if records:
+        response = supabase.table("flight_prices").insert(records).execute()
+        print(
+            f"Successfully inserted {len(records)} flight records into Supabase.")
+        return response
 
 
 async def parse_flight_card(card_locator):
@@ -105,6 +151,7 @@ async def scrape_flight(page, depart_date, return_date):
             flight_results.append(data)
 
         # print(flight_results[0])
+        save_flights_to_supabase(flight_results, route="ICN-UBN")
         return flight_results
 
     except Exception as e:
@@ -126,25 +173,26 @@ async def main():
         )
         page = await context.new_page()
 
-        all_records = []
+        # all_records = []
 
         for dep in DEPART_DATES:
             for ret in RETURN_DATES:
-                records = await scrape_flight(page, dep, ret)
-                all_records.append(records)
+                # records = await scrape_flight(page, dep, ret)
+                await scrape_flight(page, dep, ret)
+                # all_records.append(records)
                 await asyncio.sleep(2)
 
         await browser.close()
 
-        if all_records:
-            df = pd.DataFrame(
-                [record for records in all_records for record in records])
-            print("\nScraping Complete! Results Summary:")
-            print(df.to_string(index=False))
-            df.to_csv("flight_prices.csv", index=False)
-            print("\nSaved results to flight_prices.csv")
-        else:
-            print("\nNo flight records extracted.")
+        # if all_records:
+        #     df = pd.DataFrame(
+        #         [record for records in all_records for record in records])
+        #     print("\nScraping Complete! Results Summary:")
+        #     print(df.to_string(index=False))
+        #     df.to_csv("flight_prices.csv", index=False)
+        #     print("\nSaved results to flight_prices.csv")
+        # else:
+        #     print("\nNo flight records extracted.")
 
 if __name__ == "__main__":
     asyncio.run(main())
