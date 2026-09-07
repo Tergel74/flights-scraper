@@ -3,6 +3,7 @@ from playwright.async_api import async_playwright
 # import pandas as pd
 import os
 import re
+import requests
 from supabase import create_client, Client
 # from dotenv import load_dotenv
 
@@ -12,6 +13,8 @@ from supabase import create_client, Client
 # SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_PUBLISHABLE_KEY = os.environ.get("SUPABASE_PUBLISHABLE_KEY")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY)
 
@@ -20,6 +23,60 @@ DEPART_DATES = ["2026-12-19", "2026-12-20"]
 # RETURN_DATES = ["2027-02-25"]
 RETURN_DATES = ["2027-02-25", "2027-02-26",
                 "2027-02-27", "2027-02-28"]
+
+
+def send_telegram_alert(message: str):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Telegram token or chat ID missing. Skipping alert.")
+        return
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
+    try:
+        requests.post(url, json=payload, timeout=5)
+        print("Telegram alert sent!")
+    except Exception as e:
+        print(f"Failed to send Telegram alert: {e}")
+
+
+def check_price_drop(current_flights: list, route: str = "ICN-UBN"):
+    if not current_flights:
+        return
+
+    cheapest_new = min(
+        current_flights, key=lambda x: clean_price(x.get("price", "0")))
+    new_price = clean_price(cheapest_new.get("price", "0"))
+
+    try:
+        resp = supabase.table("flight_prices").select("price").eq(
+            "route", route).order("price", desc=False).limit(1).execute()
+
+        lowest = resp.data[0]["price"] if resp.data else None
+
+        if lowest is None or new_price < lowest:
+            ob = cheapest_new.get("outbound", {})
+            ib = cheapest_new.get("inbound", {})
+
+            diff_text = ""
+            if lowest:
+                savings = lowest - new_price
+                diff_text = f"\n📉 *Price Drop:* -{savings:,}₮ lower than previous minimum!"
+
+            msg = (
+                f"✈️ *PRICE DROP ALERT!* ({route})\n\n"
+                f"💰 *New Price:* {cheapest_new.get('price')}{diff_text}\n"
+                f"🏢 *Airline:* {ob.get('airline')}\n"
+                f"📅 *Outbound:* {ob.get('depart_date')} ({ob.get('depart_time')})\n"
+                f"📅 *Inbound:* {ib.get('depart_date')} ({ib.get('depart_time')})\n\n"
+                f"🔗 Check Nisleg.mn to book!"
+            )
+            send_telegram_alert(msg)
+    except Exception as e:
+        print(f"Error checking price drop: {e}")
 
 
 def clean_price(price_str: str) -> int:
@@ -153,8 +210,11 @@ async def scrape_flight(page, depart_date, return_date):
             flight_results.append(data)
 
         # print(flight_results[0])
+
+        check_price_drop(flight_results, route="ICN-UBN")
+
         save_flights_to_supabase(flight_results, route="ICN-UBN")
-        return flight_results
+        # return flight_results
 
     except Exception as e:
         print(
