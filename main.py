@@ -166,8 +166,8 @@ async def main():
     async with async_playwright() as p:
         # channel="chrome" bypasses binary download by using installed Google Chrome
         browser = await p.chromium.launch(
-            headless=False,
-            channel="chrome"
+            headless=True
+            # channel="chrome"
         )
 
         context = await browser.new_context(
