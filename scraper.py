@@ -277,7 +277,7 @@ async def scrape_flight(page, depart_date, return_date):
             flight_results.append(data)
 
         route = flight_results[0]["outbound"]["origin"] + "-" + \
-            flight_results[0]["inbound"]["destination"] if flight_results else "ICN-UBN"
+            flight_results[0]["outbound"]["destination"] if flight_results else "ICN-UBN"
 
         # print(flight_results[0])
 
