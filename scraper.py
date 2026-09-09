@@ -5,6 +5,7 @@ import os
 import re
 import requests
 from supabase import create_client, Client
+from datetime import datetime
 # from dotenv import load_dotenv
 
 # load_dotenv(override=True)
@@ -49,28 +50,35 @@ def check_price_drop(current_flights: list, route: str = "ICN-UBN"):
     if not current_flights:
         return
 
-    cheapest_new = min(
-        current_flights, key=lambda x: x.get("price", float('inf')))
-    new_price = cheapest_new.get("price", "0")
+    # cheapest_new = min(
+    #     current_flights, key=lambda x: x.get("price", float('inf')))
+    # new_price = cheapest_new.get("price", "0")
+
+    cheapest_flight = min(
+        (flight for batch in current_flights for flight in batch if flight),
+        key=lambda x: x.get("price", float("inf"))
+    )
+    current_cheapest_price = cheapest_flight.get("price", 0)
+    current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     try:
         resp = supabase.table("flight_prices").select("price").eq(
-            "route", route).order("price", desc=False).limit(1).execute()
+            "route", route).gte("outbound_depart_date", "2026-12-19").lte("outbound_depart_date", "2026-12-20").gte("inbound_depart_date", "2027-02-25").lte("inbound_depart_date", "2027-02-28").order("price", desc=False).limit(1).execute()
 
         lowest = resp.data[0]["price"] if resp.data else None
+        ob = cheapest_flight.get("outbound", {})
+        ib = cheapest_flight.get("inbound", {})
 
-        if lowest is None or new_price < lowest:
-            ob = cheapest_new.get("outbound", {})
-            ib = cheapest_new.get("inbound", {})
+        if lowest is None or current_cheapest_price < lowest:
 
             diff_text = ""
             if lowest:
-                savings = lowest - new_price
-                diff_text = f"\n📉 *Price Drop:* -{savings:,}₮ lower than previous minimum!"
+                savings = lowest - current_cheapest_price
+                diff_text = f"\n📉 *Price Drop:* -{savings:,}MNT lower than previous minimum!"
 
             msg = (
-                f"✈️ *PRICE DROP ALERT!* ({route})\n\n"
-                f"💰 *New Price:* {new_price:,} MNT{diff_text}\n"
+                f"✈️ *PRICE DROP ALERT!* {current_date} ({route})\n\n"
+                f"💰 *New Price:* {current_cheapest_price:,} MNT{diff_text}\n"
                 f"🏢 *Airline:* {ob.get('airline')}\n"
                 f"📅 *Outbound:* {ob.get('depart_date')} ({ob.get('depart_time')})\n"
                 f"📅 *Inbound:* {ib.get('depart_date')} ({ib.get('depart_time')})\n\n"
@@ -78,8 +86,16 @@ def check_price_drop(current_flights: list, route: str = "ICN-UBN"):
             )
             send_telegram_alert(msg)
         else:
-            print(
-                f"📉 No price drop. Current low: {new_price:,} MNT. Historic low: {lowest:,} MNT.")
+            msg = (
+                f"✈️ *Current Cheapest Flight (on {current_date})* ({route})\n\n"
+                f"💰 *Cheapest Price:* {current_cheapest_price:,} MNT\n"
+                f"🏢 *Airline:* {ob.get('airline')}\n"
+                f"📅 *Outbound:* {ob.get('depart_date')} ({ob.get('depart_time')})\n"
+                f"📅 *Inbound:* {ib.get('depart_date')} ({ib.get('depart_time')})\n\n"
+                f"Historic low: {lowest:,} MNT\n\n"
+                f"🔗 Check Nisleg.mn to book!"
+            )
+            send_telegram_alert(msg)
     except Exception as e:
         print(f"Error checking price drop: {e}")
 
@@ -281,10 +297,8 @@ async def scrape_flight(page, depart_date, return_date):
 
         # print(flight_results[0])
 
-        check_price_drop(flight_results, route=route)
-
         save_flights_to_supabase(flight_results, route=route)
-        # return flight_results
+        return flight_results
 
     except Exception as e:
         print(
@@ -306,16 +320,21 @@ async def main():
         )
         page = await context.new_page()
 
-        # all_records = []
+        all_records = []
 
         for dep in DEPART_DATES:
             for ret in RETURN_DATES:
-                # records = await scrape_flight(page, dep, ret)
-                await scrape_flight(page, dep, ret)
-                # all_records.append(records)
+                records = await scrape_flight(page, dep, ret)
+                # await scrape_flight(page, dep, ret)
+                all_records.append(records)
                 await asyncio.sleep(2)
 
         await browser.close()
+
+        if all_records[0]:
+            route = all_records[0][0]["outbound"]["origin"] + "-" + \
+                all_records[0][0]["outbound"]["destination"] if all_records[0] else "ICN-UBN"
+            check_price_drop(all_records, route=route)
 
         # if all_records:
         #     df = pd.DataFrame(
