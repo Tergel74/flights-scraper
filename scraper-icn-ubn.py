@@ -6,18 +6,18 @@ import re
 import requests
 from supabase import create_client, Client
 from datetime import datetime
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 
-load_dotenv(override=True)
+# load_dotenv(override=True)
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY")
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-# SUPABASE_URL = os.environ.get("SUPABASE_URL")
-# SUPABASE_PUBLISHABLE_KEY = os.environ.get("SUPABASE_PUBLISHABLE_KEY")
-# TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-# TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+# SUPABASE_URL = os.getenv("SUPABASE_URL")
+# SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY")
+# TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+# TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_PUBLISHABLE_KEY = os.environ.get("SUPABASE_PUBLISHABLE_KEY")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY)
 
@@ -145,6 +145,58 @@ def save_flights_to_supabase(flight_list: list, route: str = "ICN-UBN"):
         print(f"❌ Failed to insert into Supabase: {e}")
 
 
+# async def parse_flight_card(card_locator):
+    # price_raw = await card_locator.locator("text=/.*₮/").first.inner_text()
+    # price = price_raw.strip()
+
+    # outbound_grid = card_locator.locator("div.grid").nth(0)
+    # outbound_airline = await outbound_grid.locator("img").first.get_attribute("alt")
+
+    # ob_left_block = outbound_grid.locator("div.flex-none").nth(0)
+    # ob_middle_block = outbound_grid.locator("div.flex-auto.flex-col").first
+    # ob_right_block = outbound_grid.locator("div.flex-none").last
+
+    # ob_depart_time = await ob_left_block.locator("div.text-lg").inner_text()
+    # ob_depart_date = await ob_left_block.locator("div.text-xs").last.inner_text()
+    # ob_duration = await ob_middle_block.locator("div").first.inner_text()
+
+    # ob_landing_time = await ob_right_block.locator("div.text-lg").inner_text()
+    # ob_landing_date = await ob_right_block.locator("div.text-xs").last.inner_text()
+
+    # inbound_grid = card_locator.locator("div.grid").nth(1)
+    # inbound_airline = await inbound_grid.locator("img").first.get_attribute("alt")
+
+    # ib_left_block = inbound_grid.locator("div.flex-none").nth(0)
+    # ib_middle_block = inbound_grid.locator("div.flex-auto.flex-col").first
+    # ib_right_block = inbound_grid.locator("div.flex-none").last
+
+    # ib_depart_time = await ib_left_block.locator("div.text-lg").inner_text()
+    # ib_depart_date = await ib_left_block.locator("div.text-xs").last.inner_text()
+    # ib_duration = await ib_middle_block.locator("div").first.inner_text()
+
+    # ib_landing_time = await ib_right_block.locator("div.text-lg").inner_text()
+    # ib_landing_date = await ib_right_block.locator("div.text-xs").last.inner_text()
+
+    # return {
+    #     "price": price,
+    #     "outbound": {
+    #         "airline": outbound_airline or "Unknown",
+    #         "depart_date": ob_depart_date.strip(),
+    #         "depart_time": ob_depart_time.strip(),
+    #         "landing_date": ob_landing_date.strip(),
+    #         "landing_time": ob_landing_time.strip(),
+    #         "duration": ob_duration.strip().replace("\n", " "),
+    #     },
+    #     "inbound": {
+    #         "airline": inbound_airline or "Unknown",
+    #         "depart_date": ib_depart_date.strip(),
+    #         "depart_time": ib_depart_time.strip(),
+    #         "landing_date": ib_landing_date.strip(),
+    #         "landing_time": ib_landing_time.strip(),
+    #         "duration": ib_duration.strip().replace("\n", " "),
+    #     }
+    # }
+
 async def parse_flight_card(card: Locator) -> dict:
     """Parses a single flight result card based on the updated Nisleg UI."""
 
@@ -204,24 +256,15 @@ async def scrape_flight(page, depart_date, return_date):
 
     try:
         await page.goto(url, wait_until="networkidle", timeout=100000)
-
-        type_button = page.get_by_role(
-            "combobox").filter(has_text="Round-trip")
-        await type_button.click()
-        multi_city_button = page.get_by_role("option", name="Multi-city")
-        await multi_city_button.click()
-
         from_button = page.locator("#options-menu").filter(has_text="From")
         await from_button.click()
         await page.get_by_role("button").and_(page.get_by_title("Seoul Incheon International Airport")).click()
 
         to_button = page.locator("#options-menu").filter(has_text="To")
         await to_button.click()
-        await page.get_by_role("button").and_(page.get_by_title("Tokyo Narita International Airport")).click()
+        await page.get_by_role("button").and_(page.get_by_title("Ulaanbaatar Chinggis Khaan International Airport")).click()
 
-        departure_button = page.get_by_role(
-            "button", name="Departure", exact=True)
-        await departure_button.click()
+        await page.get_by_role("button", name="Departure", exact=True).click()
 
         next_month_btn = page.get_by_role("button", name="Go to next month")
         await next_month_btn.click()
@@ -233,46 +276,29 @@ async def scrape_flight(page, depart_date, return_date):
         await next_month_btn.click()
         await next_month_btn.click()
 
-        add_flight_button = page.get_by_text("Add flight", exact=True)
-        await add_flight_button.click()
+        feb_month = page.locator(
+            ".rdp-caption_end").filter(has_text="February 2027")
+        await feb_month.locator("button[name='day']").get_by_text(return_date[-2:], exact=True).click()
 
-        from_button2 = page.locator(
-            "#options-menu").filter(has_text="From").nth(1)
-        await from_button2.click()
-        await page.get_by_role("button").and_(page.get_by_title("Tokyo Narita International Airport")).click()
+        search_button = page.get_by_role("button", name="Search", exact=True)
+        await search_button.click()
 
-        to_button2 = page.locator("#options-menu").filter(has_text="To").nth(1)
-        await to_button2.click()
-        await page.get_by_role("button").and_(page.get_by_title("Ulaanbaatar Chinggis Khaan International Airport")).click()
+        await page.wait_for_selector("div[id^='result_content_']", timeout=15000)
 
-        departure_button2 = page.get_by_role(
-            "button", name="Departure", exact=True).nth(1)
-        await departure_button2.click()
+        cards = (await page.locator("div[id^='result_content_']").all())[:3]
+        flight_results = []
 
-        # feb_month = page.locator(
-        #     ".rdp-caption_end").filter(has_text="February 2027")
-        # await feb_month.locator("button[name='day']").get_by_text(return_date[-2:], exact=True).click()
+        for card in cards:
+            data = await parse_flight_card(card)
+            flight_results.append(data)
 
-        # search_button = page.get_by_role("button", name="Search", exact=True)
-        # await search_button.click()
+        route = flight_results[0]["outbound"]["origin"] + "-" + \
+            flight_results[0]["outbound"]["destination"] if flight_results else "ICN-UBN"
 
-        # await page.wait_for_selector("div[id^='result_content_']", timeout=15000)
+        # print(flight_results[0])
 
-        # cards = (await page.locator("div[id^='result_content_']").all())[:3]
-        # flight_results = []
-
-        # for card in cards:
-        #     data = await parse_flight_card(card)
-        #     flight_results.append(data)
-
-        # route = flight_results[0]["outbound"]["origin"] + "-" + \
-        #     flight_results[0]["outbound"]["destination"] if flight_results else "ICN-UBN"
-
-        # # print(flight_results[0])
-
-        # save_flights_to_supabase(flight_results, route=route)
-        # return flight_results
-        return []
+        save_flights_to_supabase(flight_results, route=route)
+        return flight_results
 
     except Exception as e:
         print(
@@ -284,9 +310,9 @@ async def main():
     async with async_playwright() as p:
         # channel="chrome" bypasses binary download by using installed Google Chrome
         browser = await p.chromium.launch(
-            # headless=True
-            headless=False,
-            channel="chrome"
+            headless=True
+            # headless=False,
+            # channel="chrome"
         )
 
         context = await browser.new_context(
@@ -305,10 +331,10 @@ async def main():
 
         await browser.close()
 
-        # if all_records[0]:
-        #     route = all_records[0][0]["outbound"]["origin"] + "-" + \
-        #         all_records[0][0]["outbound"]["destination"] if all_records[0] else "ICN-UBN"
-        #     check_price_drop(all_records, route=route)
+        if all_records[0]:
+            route = all_records[0][0]["outbound"]["origin"] + "-" + \
+                all_records[0][0]["outbound"]["destination"] if all_records[0] else "ICN-UBN"
+            check_price_drop(all_records, route=route)
 
         # if all_records:
         #     df = pd.DataFrame(
