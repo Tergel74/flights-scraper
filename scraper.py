@@ -1,31 +1,27 @@
 import asyncio
-from playwright.async_api import async_playwright, Locator
-# import pandas as pd
+from playwright.async_api import async_playwright
 import os
 import re
 import requests
 from supabase import create_client, Client
 from datetime import datetime
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
+from bs4 import BeautifulSoup
 
-load_dotenv(override=True)
+# load_dotenv(override=True)
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY")
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-# SUPABASE_URL = os.environ.get("SUPABASE_URL")
-# SUPABASE_PUBLISHABLE_KEY = os.environ.get("SUPABASE_PUBLISHABLE_KEY")
-# TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-# TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+# SUPABASE_URL = os.getenv("SUPABASE_URL")
+# SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY")
+# TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+# TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_PUBLISHABLE_KEY = os.environ.get("SUPABASE_PUBLISHABLE_KEY")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY)
 
-# DEPART_DATES = ["2026-12-19"]
-DEPART_DATES = ["2026-12-19", "2026-12-20"]
-# RETURN_DATES = ["2027-02-25"]
-RETURN_DATES = ["2027-02-25", "2027-02-26",
-                "2027-02-27", "2027-02-28"]
+DEPART_DATES = ["2026-12-20", "2026-12-24", "2026-02-27"]
 
 
 def send_telegram_alert(message: str):
@@ -46,58 +42,74 @@ def send_telegram_alert(message: str):
         print(f"Failed to send Telegram alert: {e}")
 
 
-def check_price_drop(current_flights: list, route: str = "ICN-UBN"):
+def check_price_drop(current_flights: list, route: str = "ICN-NRT-UBN-ICN"):
     if not current_flights:
         return
 
-    # cheapest_new = min(
-    #     current_flights, key=lambda x: x.get("price", float('inf')))
-    # new_price = cheapest_new.get("price", "0")
-
     cheapest_flight = min(
-        (flight for batch in current_flights for flight in batch if flight),
-        key=lambda x: x.get("price", float("inf"))
+        [flight for flight in current_flights], key=lambda x: x.get("price_amount", float("inf"))
     )
-    current_cheapest_price = cheapest_flight.get("price", 0)
+    current_cheapest_price = int(cheapest_flight.get("price_amount", 0))
     current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    try:
-        resp = supabase.table("flight_prices").select("price").eq(
-            "route", route).gte("outbound_depart_date", "2026-12-19").lte("outbound_depart_date", "2026-12-20").gte("inbound_depart_date", "2027-02-25").lte("inbound_depart_date", "2027-02-28").order("price", desc=False).limit(1).execute()
+    # Extract legs and metadata
+    legs = cheapest_flight.get("legs", [])
+    has_baggage = "🧳 Baggage Included" if cheapest_flight.get(
+        "includes_baggage") else "❌ No Baggage"
+    has_meal = "🍱 Meal Included" if cheapest_flight.get(
+        "includes_meal") else "❌ No Meal"
 
-        lowest = resp.data[0]["price"] if resp.data else None
-        ob = cheapest_flight.get("outbound", {})
-        ib = cheapest_flight.get("inbound", {})
+    try:
+        resp = (
+            supabase.table("flight_itineraries")
+            .select("price_amount")
+            .order("price_amount", desc=False)
+            .limit(1)
+            .execute()
+        )
+
+        lowest = int(resp.data[0]["price_amount"]) if resp.data else None
+
+        leg_lines = []
+        for i, leg in enumerate(legs, 1):
+            orig = leg.get("origin", {})
+            dest = leg.get("destination", {})
+            leg_lines.append(
+                f"  *Leg {i}:* {orig.get('code')} ➔ {dest.get('code')} ({leg.get('airline')})\n"
+                f"    └ 🛫 {orig.get('date')} {orig.get('time')} ➔ 🛬 {dest.get('date')} {dest.get('time')}"
+            )
+        legs_formatted = "\n".join(leg_lines)
 
         if lowest is None or current_cheapest_price < lowest:
-
             diff_text = ""
             if lowest:
                 savings = lowest - current_cheapest_price
-                diff_text = f"\n📉 *Price Drop:* -{savings:,}MNT lower than previous minimum!"
+                diff_text = f"\n📉 *Price Drop:* -{savings:,} MNT lower than previous minimum!"
 
             msg = (
-                f"✈️ *PRICE DROP ALERT!* {current_date} ({route})\n\n"
-                f"💰 *New Price:* {current_cheapest_price:,} MNT{diff_text}\n"
-                f"🏢 *Airline:* {ob.get('airline')}\n"
-                f"📅 *Outbound:* {ob.get('depart_date')} ({ob.get('depart_time')})\n"
-                f"📅 *Inbound:* {ib.get('depart_date')} ({ib.get('depart_time')})\n\n"
+                f"🔥 *NEW HISTORIC LOW ALERT!* ({route})\n"
+                f"⏰ *Checked:* {current_date}\n\n"
+                f"💰 *Price:* {current_cheapest_price:,} MNT{diff_text}\n"
+                f"ℹ️ {has_baggage} | {has_meal}\n\n"
+                f"✈️ *Itinerary Breakdown:*\n{legs_formatted}\n\n"
                 f"🔗 Check Nisleg.mn to book!"
             )
-            send_telegram_alert(msg)
         else:
+            diff = current_cheapest_price - lowest
             msg = (
-                f"✈️ *Current Cheapest Flight (on {current_date})* ({route})\n\n"
-                f"💰 *Cheapest Price:* {current_cheapest_price:,} MNT\n"
-                f"🏢 *Airline:* {ob.get('airline')}\n"
-                f"📅 *Outbound:* {ob.get('depart_date')} ({ob.get('depart_time')})\n"
-                f"📅 *Inbound:* {ib.get('depart_date')} ({ib.get('depart_time')})\n\n"
-                f"Historic low: {lowest:,} MNT\n\n"
+                f"📊 *DAILY CHEAPEST FLIGHT REPORT* ({route})\n"
+                f"⏰ *Checked:* {current_date}\n\n"
+                f"💰 *Current Price:* {current_cheapest_price:,} MNT\n"
+                f"🏷️ *Historic Low:* {lowest:,} MNT (+{diff:,} MNT)\n"
+                f"ℹ️ {has_baggage} | {has_meal}\n\n"
+                f"✈️ *Itinerary Breakdown:*\n{legs_formatted}\n\n"
                 f"🔗 Check Nisleg.mn to book!"
             )
-            send_telegram_alert(msg)
+
+        send_telegram_alert(msg)
+
     except Exception as e:
-        print(f"Error checking price drop: {e}")
+        print(f"❌ Error checking price drop: {e}")
 
 
 def clean_price(price_str: str) -> int:
@@ -105,102 +117,150 @@ def clean_price(price_str: str) -> int:
     return int(digits) if digits else 0
 
 
-def save_flights_to_supabase(flight_list: list, route: str = "ICN-UBN"):
-    """Inserts the newly parsed flight dictionaries into Supabase."""
-    if not flight_list:
-        return
-
-    records = []
-
-    for f in flight_list:
-        ob = f.get("outbound", {})
-        ib = f.get("inbound", {})
-
-        record = {
-            "route": route,
-            "price": f.get("price", 0),
-            "currency": "MNT",
-            "outbound_airline": ob.get("airline"),
-            "outbound_flight_number": ob.get("flight_number"),
-            "outbound_depart_date": ob.get("depart_date"),
-            "outbound_depart_time": ob.get("depart_time"),
-            "outbound_arrive_date": ob.get("arrive_date"),
-            "outbound_landing_time": ob.get("arrive_time"),
-            "inbound_airline": ib.get("airline"),
-            "inbound_flight_number": ib.get("flight_number"),
-            "inbound_depart_date": ib.get("depart_date"),
-            "inbound_depart_time": ib.get("depart_time"),
-            "inbound_arrive_date": ib.get("arrive_date"),
-            "inbound_landing_time": ib.get("arrive_time"),
-            "raw_payload": f
-        }
-        records.append(record)
-
+def is_morning_flight(time_str: str, start_hour: int = 7, end_hour: int = 10) -> bool:
+    """Checks if HH:MM time string falls between start_hour and end_hour."""
     try:
-        response = supabase.table("flight_prices").insert(records).execute()
-        print(
-            f"✅ Successfully inserted {len(records)} flight records into Supabase.")
-        return response
+        hours, minutes = map(int, time_str.strip().split(":"))
+        time_in_minutes = hours * 60 + minutes
+        return (start_hour * 60) <= time_in_minutes <= (end_hour * 60)
+    except Exception:
+        return False
+
+
+def matches_time_criteria(flight_data: dict) -> bool:
+    """Ensures Seoul (ICN) departure and UB (UBN) -> Seoul (ICN) return are both 07:00-10:00."""
+    legs = flight_data.get("legs", [])
+
+    icn_morning = False
+    ubn_to_icn_morning = False
+
+    for leg in legs:
+        origin_code = leg.get("origin", {}).get("code", "").upper()
+        dest_code = leg.get("destination", {}).get("code", "").upper()
+        dep_time = leg.get("origin", {}).get("time", "")
+
+        if origin_code == "ICN":
+            if is_morning_flight(dep_time, 7, 10):
+                icn_morning = True
+
+        if origin_code == "UBN" and dest_code == "ICN":
+            if is_morning_flight(dep_time, 7, 10):
+                ubn_to_icn_morning = True
+
+    return icn_morning and ubn_to_icn_morning
+
+
+def save_flight_itinerary(flight_data: dict):
+    try:
+        response = (
+            supabase.table("flight_itineraries")
+            .insert({
+                "price_amount": flight_data["price_amount"],
+                "price_currency": flight_data["price_currency"],
+                "tags": flight_data["tags"],
+                "includes_baggage": flight_data["includes_baggage"],
+                "includes_meal": flight_data["includes_meal"],
+                # Python dict/list is automatically serialized to JSONB
+                "legs": flight_data["legs"],
+            })
+            .execute()
+        )
+
+        return response.data
     except Exception as e:
-        print(f"❌ Failed to insert into Supabase: {e}")
+        print(f"Error saving to Supabase: {e}")
+        return None
 
 
-async def parse_flight_card(card: Locator) -> dict:
-    """Parses a single flight result card based on the updated Nisleg UI."""
+def parse_flight_card(html_content: str) -> dict:
+    soup = BeautifulSoup(html_content, "html.parser")
 
-    price_elem = card.locator("div.text-xl.font-bold")
-    price_raw = await price_elem.inner_text()
-    price = clean_price(price_raw)
-
-    leg_rows = await card.locator("div.px-6.py-4").all()
-
+    # 1. Parse each flight leg row
+    leg_rows = soup.find_all(
+        "div", class_=lambda c: c and "px-6" in c and "py-4" in c
+    )
     legs = []
-    for row in leg_rows:
-        airline = await row.locator("div.font-bold.text-xs").inner_text()
 
-        flight_num_elem = row.locator(
-            "div.text-\\[10px\\].text-muted-foreground").first
-        flight_num = await flight_num_elem.inner_text() if await flight_num_elem.count() > 0 else ""
+    for leg in leg_rows:
+        airline_el = leg.find(
+            "div", class_=lambda c: c and "font-bold" in c and "text-xs" in c
+        )
+        flight_num_el = leg.find(
+            "div", class_=lambda c: c and "text-[10px]" in c
+        )
 
-        airport_spans = await row.locator("span.text-base.font-bold").all_text_contents()
-        origin_code = airport_spans[0] if len(airport_spans) > 0 else ""
-        dest_code = airport_spans[1] if len(airport_spans) > 1 else ""
+        # Location containers: [0] = Origin, [1] = Duration Line, [2] = Destination
+        loc_blocks = leg.find_all(
+            "div", recursive=False
+        )[1].find_all("div", recursive=False)
 
-        time_divs = await row.locator("div.text-base.font-bold").all_text_contents()
-        depart_time = time_divs[0] if len(time_divs) > 0 else ""
-        arrive_time = time_divs[1] if len(time_divs) > 1 else ""
+        def extract_location(block):
+            flex_col = block.find(
+                "div", class_=lambda c: c and "flex-col" in c)
+            code_el = flex_col.find(
+                "span", class_=lambda c: c and "text-base" in c
+            ) if flex_col else None
+            city_el = flex_col.find(
+                "span", class_=lambda c: c and "text-xs" in c
+            ) if flex_col else None
+            time_el = block.find(
+                "div", class_=lambda c: c and "text-base" in c and "font-bold" in c
+            )
+            date_el = block.find(
+                "div", class_=lambda c: c and "text-[11px]" in c and "mt-0.5" in c
+            )
 
-        all_text = await row.locator("div.text-\\[11px\\].text-muted-foreground").all_text_contents()
-        dates = [t.strip() for t in all_text if re.match(
-            r"^\d{4}-\d{2}-\d{2}$", t.strip())]
-        depart_date = dates[0] if len(dates) > 0 else ""
-        arrive_date = dates[1] if len(dates) > 1 else ""
+            return {
+                "code": code_el.get_text(strip=True) if code_el else "",
+                "city": city_el.get_text(strip=True) if city_el else "",
+                "time": time_el.get_text(strip=True) if time_el else "",
+                "date": date_el.get_text(strip=True) if date_el else "",
+            }
+
+        duration_el = leg.find(
+            "div", class_=lambda c: c and "text-[11px]" in c and "font-semibold" in c
+        )
 
         legs.append({
-            "airline": airline.strip(),
-            "flight_number": flight_num.strip(),
-            "origin": origin_code.strip(),
-            "destination": dest_code.strip(),
-            "depart_time": depart_time.strip(),
-            "depart_date": depart_date.strip(),
-            "arrive_time": arrive_time.strip(),
-            "arrive_date": arrive_date.strip(),
+            "airline": airline_el.get_text(strip=True) if airline_el else "",
+            "flight_number": flight_num_el.get_text(strip=True) if flight_num_el else "",
+            "duration": duration_el.get_text(strip=True) if duration_el else "",
+            "origin": extract_location(loc_blocks[0]),
+            "destination": extract_location(loc_blocks[2]),
         })
 
-    outbound = legs[0] if len(legs) > 0 else {}
-    inbound = legs[1] if len(legs) > 1 else {}
+    # 2. Extract Price & Currency
+    price_el = soup.find(
+        "div", class_=lambda c: c and "text-xl" in c and "font-bold" in c
+    )
+    price_amount = 0.0
+    price_currency = "MNT"
+
+    if price_el:
+        price_text = price_el.get_text(strip=True)  # e.g. "2,563,600 MNT"
+        parts = price_text.split(" ")
+        if len(parts) >= 2:
+            price_amount = float(parts[0].replace(",", ""))
+            price_currency = parts[1]
+
+    # 3. Extract Tags (Baggage, Meals, Multi-city)
+    tag_spans = soup.find_all(
+        "span", class_=lambda c: c and "text-[11px]" in c)
+    tags = [t.get_text(strip=True)
+            for t in tag_spans if t.get_text(strip=True)]
 
     return {
-        "price_raw": price_raw.strip(),
-        "price": price,
-        "outbound": outbound,
-        "inbound": inbound,
+        "price_amount": price_amount,
+        "price_currency": price_currency,
+        "tags": tags,
+        "includes_baggage": any("Ачаатай" in t for t in tags),
+        "includes_meal": any("Хоолтой" in t for t in tags),
+        "legs": legs,
     }
 
 
-async def scrape_flight(page, depart_date, return_date):
+async def scrape_flight(page, depart_dates):
     url = f"https://www.nisleg.mn/en"
-    print(f"Checking: {depart_date} ➔ {return_date}...")
 
     try:
         await page.goto(url, wait_until="networkidle", timeout=100000)
@@ -229,54 +289,77 @@ async def scrape_flight(page, depart_date, return_date):
 
         december_month = page.locator(
             ".rdp-caption_end").filter(has_text="December 2026")
-        await december_month.locator("button[name='day']").get_by_text(depart_date[-2:], exact=True).click()
-        await next_month_btn.click()
-        await next_month_btn.click()
+        await december_month.locator("button[name='day']").get_by_text(depart_dates[0][-2:], exact=True).click()
 
-        add_flight_button = page.get_by_text("Add flight", exact=True)
+        add_flight_button = page.locator(
+            "button").filter(has_text="Add flight")
         await add_flight_button.click()
 
-        from_button2 = page.locator(
-            "#options-menu").filter(has_text="From").nth(1)
-        await from_button2.click()
-        await page.get_by_role("button").and_(page.get_by_title("Tokyo Narita International Airport")).click()
+        # from_button2 = page.locator(
+        #     "#options-menu").filter(has_text="From").nth(1)
+        # await from_button2.click()
+        # await page.get_by_role("button").and_(page.get_by_title("Tokyo Narita International Airport")).click()
 
-        to_button2 = page.locator("#options-menu").filter(has_text="To").nth(1)
+        to_button2 = page.locator("button[title='To']").first
         await to_button2.click()
         await page.get_by_role("button").and_(page.get_by_title("Ulaanbaatar Chinggis Khaan International Airport")).click()
 
         departure_button2 = page.get_by_role(
-            "button", name="Departure", exact=True).nth(1)
+            "button", name="Departure", exact=True)
         await departure_button2.click()
 
-        # feb_month = page.locator(
-        #     ".rdp-caption_end").filter(has_text="February 2027")
-        # await feb_month.locator("button[name='day']").get_by_text(return_date[-2:], exact=True).click()
+        december_month = page.locator(
+            ".rdp-caption_start").filter(has_text="December 2026")
+        await december_month.locator("button[name='day']").get_by_text(depart_dates[1][-2:], exact=True).click()
 
-        # search_button = page.get_by_role("button", name="Search", exact=True)
-        # await search_button.click()
+        add_flight_button = page.locator(
+            "button").filter(has_text="Add flight")
+        await add_flight_button.click()
 
-        # await page.wait_for_selector("div[id^='result_content_']", timeout=15000)
+        # from_button3 = page.locator(
+        #     "#options-menu").filter(has_text="From").nth(2)
+        # await from_button3.click()
+        # await page.get_by_role("button").and_(page.get_by_title("Ulaanbaatar Chinggis Khaan International Airport")).click()
 
-        # cards = (await page.locator("div[id^='result_content_']").all())[:3]
-        # flight_results = []
+        to_button3 = page.locator("button[title='To']").first
+        await to_button3.click()
+        await page.get_by_role("button").and_(page.get_by_title("Seoul Incheon International Airport")).click()
 
-        # for card in cards:
-        #     data = await parse_flight_card(card)
-        #     flight_results.append(data)
+        departure_button3 = page.get_by_role(
+            "button", name="Departure", exact=True)
+        await departure_button3.click()
 
-        # route = flight_results[0]["outbound"]["origin"] + "-" + \
-        #     flight_results[0]["outbound"]["destination"] if flight_results else "ICN-UBN"
+        next_month_btn = page.get_by_role("button", name="Go to next month")
+        await next_month_btn.click()
 
-        # # print(flight_results[0])
+        feb_month = page.locator(
+            ".rdp-caption_end").filter(has_text="February 2027")
+        await feb_month.locator("button[name='day']").get_by_text(depart_dates[2][-2:], exact=True).click()
 
-        # save_flights_to_supabase(flight_results, route=route)
-        # return flight_results
-        return []
+        search_button = page.get_by_role("button", name="Search", exact=True)
+        await search_button.click()
+
+        await page.wait_for_selector("div[id^='result_content_']", timeout=15000)
+
+        all_cards = await page.locator("div[id^='result_content_']").all()
+        flight_results = []
+
+        for card in all_cards:
+            card_html = await card.inner_html()
+            data = parse_flight_card(card_html)
+
+            if not data:
+                continue
+
+            if matches_time_criteria(data):
+                save_flight_itinerary(data)
+                flight_results.append(data)
+
+        return flight_results
 
     except Exception as e:
         print(
-            f"Could not load results for {depart_date} to {return_date}: {e}")
+            f"Could not load results for {depart_dates}: {e}")
         return []
 
 
@@ -284,9 +367,9 @@ async def main():
     async with async_playwright() as p:
         # channel="chrome" bypasses binary download by using installed Google Chrome
         browser = await p.chromium.launch(
-            # headless=True
-            headless=False,
-            channel="chrome"
+            headless=True
+            # headless=False,
+            # channel="chrome"
         )
 
         context = await browser.new_context(
@@ -294,31 +377,13 @@ async def main():
         )
         page = await context.new_page()
 
-        all_records = []
-
-        for dep in DEPART_DATES:
-            for ret in RETURN_DATES:
-                records = await scrape_flight(page, dep, ret)
-                # await scrape_flight(page, dep, ret)
-                all_records.append(records)
-                await asyncio.sleep(2)
+        records = await scrape_flight(page, DEPART_DATES)
+        # await scrape_flight(page, dep, ret)
+        await asyncio.sleep(2)
 
         await browser.close()
 
-        # if all_records[0]:
-        #     route = all_records[0][0]["outbound"]["origin"] + "-" + \
-        #         all_records[0][0]["outbound"]["destination"] if all_records[0] else "ICN-UBN"
-        #     check_price_drop(all_records, route=route)
-
-        # if all_records:
-        #     df = pd.DataFrame(
-        #         [record for records in all_records for record in records])
-        #     print("\nScraping Complete! Results Summary:")
-        #     print(df.to_string(index=False))
-        #     df.to_csv("flight_prices.csv", index=False)
-        #     print("\nSaved results to flight_prices.csv")
-        # else:
-        #     print("\nNo flight records extracted.")
+        check_price_drop(records)
 
 if __name__ == "__main__":
     asyncio.run(main())

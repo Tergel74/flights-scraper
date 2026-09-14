@@ -3,7 +3,7 @@ name: Flight Scraper
 on:
     schedule:
         # Runs twice a day at 00:00 and 12:00 UTC (9:00 AM & 9:00 PM KST)
-        - cron: "0 0,12 * * *"
+        - cron: "0 9,21 * * *"
     # Allows manually triggering the workflow from the GitHub Actions tab anytime
     workflow_dispatch:
 
@@ -37,7 +37,7 @@ jobs:
                   TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
                   TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
               run: |
-                  python scraper-icn-ubn.py
+                  python scraper.py
 
             - name: Upload Error Screenshots (if script fails)
               if: failure()
