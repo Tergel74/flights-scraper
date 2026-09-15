@@ -21,7 +21,7 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY)
 
-DEPART_DATES = ["2026-12-20", "2026-12-24", "2026-02-27"]
+DEPART_DATES = ["2026-12-23", "2026-12-28", "2026-02-27"]
 
 
 def send_telegram_alert(message: str):
